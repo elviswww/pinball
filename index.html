@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>復古霓虹街機彈珠台 - Retro Neon Pinball</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Share+Tech+Mono&display=swap');
+
+    :root {
+      --neon-pink: #ff007f;
+      --neon-cyan: #00f0ff;
+      --neon-yellow: #ffe600;
+      --neon-green: #39ff14;
+      --neon-purple: #9d00ff;
+    }
+
+    body {
+      background: radial-gradient(circle at 50% 30%, #151829 0%, #070811 100%);
+      font-family: 'Share Tech Mono', monospace;
+      color: #d1d8ec;
+      user-select: none;
+      touch-action: manipulation;
+      overflow-x: hidden;
+    }
+
+    .retro-font {
+      font-family: 'Press Start 2P', monospace;
+    }
+
+    /* 復古 CRT 掃描線特效 */
+    .crt-overlay::before {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.28) 50%);
+      background-size: 100% 4px;
+      z-index: 20;
+      pointer-events: none;
+      opacity: 0.55;
+    }
+
+    .arcade-btn {
+      transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 5px 0 rgba(0,0,0,0.6);
+    }
+    .arcade-btn:active, .arcade-btn.pressed {
+      transform: translateY(3px);
+      box-shadow: 0 2px 0 rgba(0,0,0,0.8);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 selection:bg-pink-500 selection:text-white">
+
+<div class="w-full max-w-5xl flex flex-col lg:flex-row gap-4 items-center justify-center">
+
+  <!-- 彈珠台主機櫃 -->
+  <div class="relative bg-slate-900/90 border-4 border-cyan-500/80 rounded-2xl p-2 sm:p-3 shadow-2xl shadow-cyan-500/20 crt-overlay flex flex-col items-center">
+    
+    <!-- 頂部跑馬燈裝飾欄 -->
+    <div class="w-full flex items-center justify-between px-3 py-1.5 mb-2 bg-slate-950 border border-slate-700 rounded-lg text-xs">
+      <div class="flex items-center space-x-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+        <span class="retro-font text-[10px] text-pink-500 tracking-wider">RETRO PINBALL</span>
+      </div>
+      <div class="flex items-center space-x-3">
+        <button id="soundToggleBtn" class="px-2 py-0.5 rounded bg-slate-800 border border-slate-600 text-[10px] text-cyan-300 hover:bg-slate-700 transition">
+          🔊 音效: 開
+        </button>
+        <button id="nudgeBtn" class="px-2 py-0.5 rounded bg-amber-900/80 border border-amber-600 text-[10px] text-amber-300 hover:bg-amber-800 transition">
+          💥 搖晃防卡 (NUDGE)
+        </button>
+      </div>
+    </div>
+
+    <!-- 遊戲畫布與結算彈窗 -->
+    <div class="relative rounded-xl overflow-hidden bg-black border-2 border-slate-800">
+      <canvas id="pinballCanvas" width="460" height="660" class="block w-[340px] h-[487px] sm:w-[420px] sm:h-[602px] md:w-[460px] md:h-[660px]"></canvas>
+
+      <!-- 結算與開始彈窗 Modal -->
+      <div id="gameModal" class="absolute inset-0 bg-slate-950/92 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-6 text-center transition-all duration-300">
+        <h2 id="modalTitle" class="retro-font text-2xl sm:text-3xl text-pink-500 mb-3 drop-shadow-[0_0_12px_rgba(255,0,127,0.8)]">
+          RETRO PINBALL
+        </h2>
+        <p id="modalSub" class="text-slate-300 text-sm mb-4">
+          長按 Space 蓄力發射彈珠，A / D 操控擋板迎擊高分！
+        </p>
+
+        <!-- 計分統計欄位 -->
+        <div class="bg-slate-900 border border-slate-700 rounded-xl p-4 w-64 mb-6 shadow-inner text-left">
+          <div class="flex justify-between items-center mb-2">
+            <span class="text-xs text-slate-400">本局得分</span>
+            <span id="modalCurrentScore" class="retro-font text-cyan-400 text-sm">000000</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">歷史紀錄 (存於本機)</span>
+            <span id="modalHighScore" class="retro-font text-yellow-400 text-sm">000000</span>
+          </div>
+        </div>
+
+        <button id="startPlayBtn" class="retro-font arcade-btn px-6 py-3.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 text-white text-xs sm:text-sm tracking-wider hover:brightness-110 active:scale-95 border-b-4 border-pink-900">
+          START GAME [開始遊戲]
+        </button>
+      </div>
+    </div>
+
+    <!-- 行動端虛擬按鈕 -->
+    <div class="w-full flex items-center justify-between gap-2 mt-3 pt-2 border-t border-slate-800/80">
+      <button id="touchLeftBtn" class="arcade-btn flex-1 py-3 px-2 rounded-xl bg-cyan-950 border-2 border-cyan-500 text-cyan-300 font-bold text-sm sm:text-base flex items-center justify-center gap-1 active:bg-cyan-800">
+        ◀ 左板 (A)
+      </button>
+      <button id="touchLaunchBtn" class="arcade-btn flex-1 py-3 px-2 rounded-xl bg-amber-950 border-2 border-yellow-500 text-yellow-300 font-bold text-sm sm:text-base flex items-center justify-center gap-1 active:bg-amber-800">
+        🚀 蓄力發射 (Space)
+      </button>
+      <button id="touchRightBtn" class="arcade-btn flex-1 py-3 px-2 rounded-xl bg-pink-950 border-2 border-pink-500 text-pink-300 font-bold text-sm sm:text-base flex items-center justify-center gap-1 active:bg-pink-800">
+        右板 (D) ▶
+      </button>
+    </div>
+  </div>
+
+  <!-- 側邊儀表板 (Desktop & Tablet) -->
+  <div class="w-full max-w-xs flex flex-col gap-3">
+    
+    <!-- 最高分卡片 -->
+    <div class="bg-slate-900/90 border-2 border-yellow-500/60 rounded-xl p-3 sm:p-4 shadow-lg shadow-yellow-500/10">
+      <div class="text-[11px] text-yellow-400/80 tracking-widest font-semibold flex items-center justify-between">
+        <span>🏆 HIGH SCORE (最高分)</span>
+        <button id="resetScoreBtn" title="清除本機紀錄" class="text-[10px] text-slate-500 hover:text-red-400 underline">清除</button>
+      </div>
+      <div id="highScoreBoard" class="retro-font text-yellow-300 text-xl sm:text-2xl mt-2 tracking-wider">
+        000000
+      </div>
+    </div>
+
+    <!-- 當前得分卡片 -->
+    <div class="bg-slate-900/90 border-2 border-cyan-500/60 rounded-xl p-3 sm:p-4 shadow-lg shadow-cyan-500/10">
+      <div class="text-[11px] text-cyan-400/80 tracking-widest font-semibold">
+        ⭐ CURRENT SCORE (當前得分)
+      </div>
+      <div id="scoreBoard" class="retro-font text-cyan-300 text-xl sm:text-2xl mt-2 tracking-wider">
+        000000
+      </div>
+    </div>
+
+    <!-- 剩餘彈珠數與發射蓄力槽 -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 sm:p-4">
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-xs text-slate-400">剩餘球數</span>
+        <div id="ballsIndicator" class="flex space-x-1.5">
+          <span class="w-3.5 h-3.5 rounded-full bg-white shadow-[0_0_8px_#fff]"></span>
+          <span class="w-3.5 h-3.5 rounded-full bg-white shadow-[0_0_8px_#fff]"></span>
+          <span class="w-3.5 h-3.5 rounded-full bg-white shadow-[0_0_8px_#fff]"></span>
+        </div>
+      </div>
+
+      <!-- 發射彈簧蓄力條 -->
+      <div class="mt-3">
+        <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+          <span>彈簧蓄力 (SPACE)</span>
+          <span id="plungerPercent">0%</span>
+        </div>
+        <div class="w-full h-3 bg-slate-950 rounded-full border border-slate-700 overflow-hidden p-0.5">
+          <div id="plungerBar" class="h-full w-0 bg-gradient-to-r from-yellow-400 via-pink-500 to-red-500 rounded-full transition-all duration-75"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 控制指南 -->
+    <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-400 leading-relaxed">
+      <div class="text-cyan-400 font-bold mb-1.5 flex items-center gap-1">
+        <span>🎮</span> 操作指令
+      </div>
+      <ul class="space-y-1">
+        <li>• <kbd class="px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded border border-slate-700 font-mono text-[10px]">A</kbd> 或 <kbd class="px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded border border-slate-700 font-mono text-[10px]">←</kbd> ： 左拍板</li>
+        <li>• <kbd class="px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded border border-slate-700 font-mono text-[10px]">D</kbd> 或 <kbd class="px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded border border-slate-700 font-mono text-[10px]">→</kbd> ： 右拍板</li>
+        <li>• <kbd class="px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded border border-slate-700 font-mono text-[10px]">Space</kbd> ： 長按蓄力並釋放發射</li>
+        <li>• 美式標準：每局共有 <strong>3 顆球</strong>。</li>
+        <li>• 衝擊各色霓虹緩衝球以獲取高額點數！</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('pinballCanvas');
+  const ctx = canvas.getContext('2d');
+  const scoreBoard = document.getElementById('scoreBoard');
+  const highScoreBoard = document.getElementById('highScoreBoard');
+  const ballsIndicator = document.getElementById('ballsIndicator');
+  const plungerBar = document.getElementById('plungerBar');
+  const plungerPercent = document.getElementById('plungerPercent');
+  const gameModal = document.getElementById('gameModal');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalSub = document.getElementById('modalSub');
+  const modalCurrentScore = document.getElementById('modalCurrentScore');
+  const modalHighScore = document.getElementById('modalHighScore');
+  const startPlayBtn = document.getElementById('startPlayBtn');
+  const soundToggleBtn = document.getElementById('soundToggleBtn');
+  const resetScoreBtn = document.getElementById('resetScoreBtn');
+  const nudgeBtn = document.getElementById('nudgeBtn');
+
+  const touchLeftBtn = document.getElementById('touchLeftBtn');
+  const touchRightBtn = document.getElementById('touchRightBtn');
+  const touchLaunchBtn = document.getElementById('touchLaunchBtn');
+
+  /* 8-bit Web Audio 晶片音效合成器 */
+  let audioEnabled = true;
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) audioCtx = new AudioContextClass();
+    }
+  }
+
+  function playTone(freq, type = 'sine', duration = 0.1, gainVal = 0.1) {
+    if (!audioEnabled) return;
+    try {
+      initAudio();
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+      gain.gain.setValueAtTime(gainVal, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch (e) {
+      console.warn('Audio play failed:', e);
+    }
+  }
+
+  const SoundFX = {
+    bumper: () => { playTone(540, 'triangle', 0.12, 0.2); setTimeout(() => playTone(880, 'sine', 0.08, 0.15), 30); },
+    flipper: () => playTone(220, 'square', 0.06, 0.08),
+    launch: () => playTone(320, 'sawtooth', 0.2, 0.15),
+    charge: (f) => playTone(150 + f * 5, 'sine', 0.05, 0.04),
+    loseBall: () => {
+      playTone(300, 'sawtooth', 0.2, 0.15);
+      setTimeout(() => playTone(180, 'sawtooth', 0.4, 0.2), 150);
+    },
+    gameOver: () => {
+      [260, 220, 195, 140].forEach((f, idx) => {
+        setTimeout(() => playTone(f, 'sawtooth', 0.25, 0.2), idx * 160);
+      });
+    },
+    highScore: () => {
+      [330, 392, 523, 659].forEach((f, idx) => {
+        setTimeout(() => playTone(f, 'square', 0.18, 0.2), idx * 130);
+      });
+    }
+  };
+
+  /* LocalStorage 讀取與寫入防呆 */
+  const STORAGE_KEY = 'retro_pinball_highscore_val';
+
+  function readStoredHighScore() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const val = parseInt(raw, 10);
+      return (!isNaN(val) && val >= 0) ? val : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function writeStoredHighScore(val) {
+    try {
+      localStorage.setItem(STORAGE_KEY, val.toString());
+    } catch (e) {
+      console.warn('LocalStorage save error', e);
+    }
+  }
+
+  let highScore = readStoredHighScore();
+  highScoreBoard.textContent = highScore.toString().padStart(6, '0');
+
+  resetScoreBtn.addEventListener('click', () => {
+    highScore = 0;
+    writeStoredHighScore(0);
+    highScoreBoard.textContent = '000000';
+  });
+
+  soundToggleBtn.addEventListener('click', () => {
+    audioEnabled = !audioEnabled;
+    soundToggleBtn.textContent = audioEnabled ? '🔊 音效: 開' : '🔇 音效: 關';
+    if (audioEnabled) initAudio();
+  });
+
+  /* 物理與幾何演算設定 (連續碰撞防穿牆) */
+  const SUB_STEPS = 8;
+  const GRAVITY = 0.24;
+  const RESTITUTION = 0.76;
+  const PLUNGER_MAX_POWER = 60;
+
+  let gameState = 'MENU'; // 'MENU' | 'WAIT_LAUNCH' | 'PLAYING' | 'OVER'
+  let score = 0;
+  let ballsLeft = 3;
+  let chargeTime = 0;
+  let isCharging = false;
+  let stuckFramesCounter = 0;
+
+  // 粒子特效
+  let particles = [];
+  function spawnSparks(x, y, color, count = 10) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 4;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1.0,
+        decay: 0.03 + Math.random() * 0.04,
+        color
+      });
+    }
+  }
+
+  // 彈珠實體
+  const ball = {
+    x: 428,
+    y: 590,
+    vx: 0,
+    vy: 0,
+    radius: 9,
+    color: '#ffffff',
+    inPlay: false
+  };
+
+  // 靜態邊界與導流線段
+  const segments = [
+    // 外圍邊界
+    { x1: 20, y1: 650, x2: 20, y2: 130 },
+    { x1: 20, y1: 130, x2: 120, y2: 30 },
+    { x1: 120, y1: 30, x2: 340, y2: 30 },
+    { x1: 340, y1: 30, x2: 445, y2: 135 },
+    { x1: 445, y1: 135, x2: 445, y2: 650 },
+
+    // 右側發射通道隔板
+    { x1: 405, y1: 650, x2: 405, y2: 180 },
+
+    // 頂部圓弧引流擋片
+    { x1: 405, y1: 180, x2: 340, y2: 110 },
+
+    // 兩側斜向回彈板
+    { x1: 20, y1: 460, x2: 125, y2: 525 },
+    { x1: 405, y1: 460, x2: 300, y2: 525 },
+
+    // 三角彈射角塊 (Slingshots)
+    { x1: 65, y1: 340, x2: 105, y2: 420 },
+    { x1: 105, y1: 420, x2: 65, y2: 430 },
+    { x1: 65, y1: 430, x2: 65, y2: 340 },
+
+    { x1: 360, y1: 340, x2: 320, y2: 420 },
+    { x1: 320, y1: 420, x2: 360, y2: 430 },
+    { x1: 360, y1: 430, x2: 360, y2: 340 }
+  ];
+
+  // 霓虹緩衝球 (Bumpers)
+  const bumpers = [
+    { x: 155, y: 190, r: 25, score: 300, color: '#ff007f', flash: 0 },
+    { x: 275, y: 190, r: 25, score: 300, color: '#ff007f', flash: 0 },
+    { x: 215, y: 265, r: 30, score: 500, color: '#00f0ff', flash: 0 },
+    { x: 140, y: 350, r: 18, score: 200, color: '#ffe600', flash: 0 },
+    { x: 285, y: 350, r: 18, score: 200, color: '#ffe600', flash: 0 }
+  ];
+
+  class Flipper {
+    constructor(pivotX, pivotY, length, isLeft) {
+      this.pivotX = pivotX;
+      this.pivotY = pivotY;
+      this.length = length;
+      this.isLeft = isLeft;
+      this.restAngle = isLeft ? 0.48 : Math.PI - 0.48;
+      this.upAngle = isLeft ? -0.42 : Math.PI + 0.42;
+      this.angle = this.restAngle;
+      this.angularVelocity = 0;
+      this.isActive = false;
+    }
+
+    update() {
+      const target = this.isActive ? this.upAngle : this.restAngle;
+      const diff = target - this.angle;
+      this.angularVelocity = diff * 0.45;
+      this.angle += this.angularVelocity;
+    }
+
+    getTip() {
+      return {
+        x: this.pivotX + Math.cos(this.angle) * this.length,
+        y: this.pivotY + Math.sin(this.angle) * this.length
+      };
+    }
+
+    draw(context) {
+      const tip = this.getTip();
+      context.save();
+      context.lineWidth = 12;
+      context.lineCap = 'round';
+      context.strokeStyle = this.isLeft ? '#00f0ff' : '#ff007f';
+      context.shadowColor = context.strokeStyle;
+      context.shadowBlur = 10;
+
+      context.beginPath();
+      context.moveTo(this.pivotX, this.pivotY);
+      context.lineTo(tip.x, tip.y);
+      context.stroke();
+
+      context.fillStyle = '#ffffff';
+      context.beginPath();
+      context.arc(this.pivotX, this.pivotY, 6, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    }
+  }
+
+  const leftFlipper = new Flipper(125, 525, 76, true);
+  const rightFlipper = new Flipper(300, 525, 76, false);
+
+  const keys = { A: false, D: false, Space: false };
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyA' || e.key === 'ArrowLeft') {
+      keys.A = true;
+      SoundFX.flipper();
+    }
+    if (e.code === 'KeyD' || e.key === 'ArrowRight') {
+      keys.D = true;
+      SoundFX.flipper();
+    }
+    if (e.code === 'Space') {
+      if (!keys.Space) isCharging = true;
+      keys.Space = true;
+      e.preventDefault();
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyA' || e.key === 'ArrowLeft') keys.A = false;
+    if (e.code === 'KeyD' || e.key === 'ArrowRight') keys.D = false;
+    if (e.code === 'Space') {
+      if (gameState === 'WAIT_LAUNCH' && isCharging) {
+        launchPlunger();
+      }
+      keys.Space = false;
+      isCharging = false;
+      chargeTime = 0;
+      updatePlungerDisplay();
+    }
+  });
+
+  const bindTouch = (elem, onPress, onRelease) => {
+    elem.addEventListener('touchstart', (e) => { e.preventDefault(); onPress(); }, { passive: false });
+    elem.addEventListener('touchend', (e) => { e.preventDefault(); onRelease(); }, { passive: false });
+    elem.addEventListener('mousedown', (e) => { e.preventDefault(); onPress(); });
+    elem.addEventListener('mouseup', (e) => { e.preventDefault(); onRelease(); });
+    elem.addEventListener('mouseleave', () => { onRelease(); });
+  };
+
+  bindTouch(touchLeftBtn, () => { keys.A = true; SoundFX.flipper(); }, () => { keys.A = false; });
+  bindTouch(touchRightBtn, () => { keys.D = true; SoundFX.flipper(); }, () => { keys.D = false; });
+  bindTouch(touchLaunchBtn, () => {
+    if (gameState === 'WAIT_LAUNCH') isCharging = true;
+  }, () => {
+    if (gameState === 'WAIT_LAUNCH' && isCharging) {
+      launchPlunger();
+    }
+    isCharging = false;
+    chargeTime = 0;
+    updatePlungerDisplay();
+  });
+
+  function applyNudge() {
+    if (gameState !== 'PLAYING') return;
+    ball.vx += (Math.random() - 0.5) * 4.5;
+    ball.vy += (Math.random() - 0.8) * 4;
+    spawnSparks(ball.x, ball.y, '#ffe600', 8);
+    playTone(180, 'sawtooth', 0.1, 0.1);
+  }
+  nudgeBtn.addEventListener('click', applyNudge);
+
+  function updatePlungerDisplay() {
+    const pct = Math.min(Math.round((chargeTime / PLUNGER_MAX_POWER) * 100), 100);
+    plungerBar.style.width = `${pct}%`;
+    plungerPercent.textContent = `${pct}%`;
+  }
+
+  function setupNextBall() {
+    ball.x = 425;
+    ball.y = 590;
+    ball.vx = 0;
+    ball.vy = 0;
+    ball.inPlay = false;
+    gameState = 'WAIT_LAUNCH';
+    stuckFramesCounter = 0;
+  }
+
+  function launchPlunger() {
+    const power = Math.max(0.2, Math.min(chargeTime / PLUNGER_MAX_POWER, 1.0));
+    ball.vy = -(15 + power * 17);
+    ball.vx = (Math.random() - 0.5) * 0.8;
+    ball.inPlay = true;
+    gameState = 'PLAYING';
+    SoundFX.launch();
+    spawnSparks(ball.x, ball.y, '#ffe600', 12);
+  }
+
+  function updateBallsIndicator() {
+    ballsIndicator.innerHTML = '';
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElement('span');
+      dot.className = `w-3.5 h-3.5 rounded-full transition-all ${
+        i < ballsLeft ? 'bg-white shadow-[0_0_8px_#fff]' : 'bg-slate-700 border border-slate-600'
+      }`;
+      ballsIndicator.appendChild(dot);
+    }
+  }
+
+  function startNewGame() {
+    score = 0;
+    ballsLeft = 3;
+    scoreBoard.textContent = '000000';
+    updateBallsIndicator();
+    gameModal.classList.add('opacity-0', 'pointer-events-none');
+    setupNextBall();
+  }
+
+  function gameOver() {
+    gameState = 'OVER';
+    const isNewHigh = score > highScore;
+    if (isNewHigh) {
+      highScore = score;
+      writeStoredHighScore(highScore);
+      highScoreBoard.textContent = highScore.toString().padStart(6, '0');
+      SoundFX.highScore();
+    } else {
+      SoundFX.gameOver();
+    }
+
+    modalTitle.textContent = isNewHigh ? '🏆 NEW RECORD!' : 'GAME OVER';
+    modalTitle.style.color = isNewHigh ? 'var(--neon-yellow)' : 'var(--neon-pink)';
+    modalSub.textContent = isNewHigh ? '太神啦！成功打破歷史最高紀錄！' : '3 顆球已耗盡，再挑戰一次吧！';
+    modalCurrentScore.textContent = score.toString().padStart(6, '0');
+    modalHighScore.textContent = highScore.toString().padStart(6, '0');
+    startPlayBtn.textContent = 'AGAIN [重新開始]';
+    gameModal.classList.remove('opacity-0', 'pointer-events-none');
+  }
+
+  startPlayBtn.addEventListener('click', () => {
+    initAudio();
+    startNewGame();
+  });
+
+  function closestPointOnSeg(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    return { x: x1 + t * dx, y: y1 + t * dy, t };
+  }
+
+  function stepPhysics(dt) {
+    if (!ball.inPlay || gameState !== 'PLAYING') return;
+
+    ball.vy += GRAVITY * dt;
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+
+    // 線段碰撞判定
+    for (const seg of segments) {
+      const pt = closestPointOnSeg(ball.x, ball.y, seg.x1, seg.y1, seg.x2, seg.y2);
+      const dx = ball.x - pt.x;
+      const dy = ball.y - pt.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < ball.radius) {
+        const nx = dx / (dist || 1);
+        const ny = dy / (dist || 1);
+        ball.x = pt.x + nx * ball.radius;
+        ball.y = pt.y + ny * ball.radius;
+
+        const dot = ball.vx * nx + ball.vy * ny;
+        if (dot < 0) {
+          ball.vx = (ball.vx - 2 * dot * nx) * RESTITUTION;
+          ball.vy = (ball.vy - 2 * dot * ny) * RESTITUTION;
+        }
+      }
+    }
+
+    // 圓形緩衝球碰撞
+    for (const b of bumpers) {
+      const dx = ball.x - b.x;
+      const dy = ball.y - b.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = ball.radius + b.r;
+
+      if (dist < minDist) {
+        const nx = dx / (dist || 1);
+        const ny = dy / (dist || 1);
+        ball.x = b.x + nx * minDist;
+        ball.y = b.y + ny * minDist;
+
+        const dot = ball.vx * nx + ball.vy * ny;
+        const pushImpulse = 11.5;
+        ball.vx = (ball.vx - 2 * dot * nx) * 0.7 + nx * pushImpulse;
+        ball.vy = (ball.vy - 2 * dot * ny) * 0.7 + ny * pushImpulse;
+
+        b.flash = 12;
+        score += b.score;
+        scoreBoard.textContent = score.toString().padStart(6, '0');
+        spawnSparks(b.x + nx * b.r, b.y + ny * b.r, b.color, 14);
+        SoundFX.bumper();
+      }
+    }
+
+    // 拍板碰撞
+    [leftFlipper, rightFlipper].forEach(f => {
+      const tip = f.getTip();
+      const pt = closestPointOnSeg(ball.x, ball.y, f.pivotX, f.pivotY, tip.x, tip.y);
+      const dx = ball.x - pt.x;
+      const dy = ball.y - pt.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < ball.radius) {
+        const nx = dx / (dist || 1);
+        const ny = dy / (dist || 1);
+        ball.x = pt.x + nx * ball.radius;
+        ball.y = pt.y + ny * ball.radius;
+
+        const leverArm = pt.t * f.length;
+        const paddleSpeedY = f.angularVelocity * leverArm;
+        const dot = ball.vx * nx + ball.vy * ny;
+
+        if (dot < 0) {
+          ball.vx = (ball.vx - 2 * dot * nx) * 0.75;
+          ball.vy = (ball.vy - 2 * dot * ny) * 0.75 - Math.abs(paddleSpeedY) * 2.1;
+          SoundFX.flipper();
+          spawnSparks(ball.x, ball.y, '#00f0ff', 6);
+        }
+      }
+    });
+
+    // 防卡球偵測（在場內速度極低時自動補推）
+    if (Math.hypot(ball.vx, ball.vy) < 0.3 && ball.y < 520) {
+      stuckFramesCounter++;
+      if (stuckFramesCounter > 150) {
+        ball.vx += (Math.random() - 0.5) * 5;
+        ball.vy -= 4.5;
+        stuckFramesCounter = 0;
+        spawnSparks(ball.x, ball.y, '#39ff14', 8);
+      }
+    } else {
+      stuckFramesCounter = 0;
+    }
+
+    // 出界落入排水口
+    if (ball.y > canvas.height + 25) {
+      ball.inPlay = false;
+      ballsLeft--;
+      updateBallsIndicator();
+      SoundFX.loseBall();
+
+      if (ballsLeft > 0) {
+        setupNextBall();
+      } else {
+        gameOver();
+      }
+    }
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 背景格線
+    ctx.strokeStyle = '#0f1424';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < canvas.width; x += 25) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += 25) {
+      ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
+
+    // 繪製牆壁與邊框
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#2b396b';
+    ctx.shadowColor = '#00f0ff';
+    ctx.shadowBlur = 6;
+    for (const seg of segments) {
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+      ctx.stroke();
+    }
+
+    // 彈簧發射井壓縮視覺
+    if (gameState === 'WAIT_LAUNCH') {
+      const springCompress = Math.min(chargeTime * 0.4, 25);
+      ctx.strokeStyle = '#ffe600';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(415, 630);
+      ctx.lineTo(438, 630 + springCompress);
+      ctx.stroke();
+    }
+
+    // 緩衝球 Bumpers
+    bumpers.forEach(b => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = b.color;
+      ctx.shadowColor = b.color;
+      ctx.shadowBlur = b.flash > 0 ? b.flash * 2.5 : 10;
+      ctx.fill();
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`+${b.score}`, b.x, b.y);
+
+      if (b.flash > 0) b.flash--;
+      ctx.restore();
+    });
+
+    // 擋板
+    leftFlipper.draw(ctx);
+    rightFlipper.draw(ctx);
+
+    // 彈珠
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 12;
+    ctx.fill();
+    ctx.restore();
+
+    // 火花粒子
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+
+      if (p.life <= 0) {
+        particles.splice(i, 1);
+        continue;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function gameLoop() {
+    if (isCharging && gameState === 'WAIT_LAUNCH') {
+      chargeTime = Math.min(chargeTime + 1, PLUNGER_MAX_POWER);
+      updatePlungerDisplay();
+      if (chargeTime % 5 === 0) SoundFX.charge(chargeTime);
+    }
+
+    leftFlipper.isActive = keys.A;
+    rightFlipper.isActive = keys.D;
+    leftFlipper.update();
+    rightFlipper.update();
+
+    const dt = 1.0 / SUB_STEPS;
+    for (let s = 0; s < SUB_STEPS; s++) {
+      stepPhysics(dt);
+    }
+
+    render();
+    requestAnimationFrame(gameLoop);
+  }
+
+  // 初始準備
+  setupNextBall();
+  requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>
