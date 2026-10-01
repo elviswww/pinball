@@ -248,6 +248,10 @@
     flipper: () => playTone(220, 'square', 0.06, 0.08),
     launch: () => playTone(320, 'sawtooth', 0.2, 0.15),
     charge: (f) => playTone(150 + f * 5, 'sine', 0.05, 0.04),
+    gateClose: () => {
+      playTone(480, 'square', 0.08, 0.15);
+      setTimeout(() => playTone(260, 'sawtooth', 0.12, 0.18), 50);
+    },
     loseBall: () => {
       playTone(300, 'sawtooth', 0.2, 0.15);
       setTimeout(() => playTone(180, 'sawtooth', 0.4, 0.2), 150);
@@ -312,6 +316,13 @@
   let chargeTime = 0;
   let isCharging = false;
   let stuckFramesCounter = 0;
+
+  // 發射通道閉合閘門（發射進入球台後即刻封閉通道，防回流）
+  const laneGate = {
+    isClosed: false,
+    animProgress: 0, // 0: 開啟, 1: 完全閉合
+    segment: { x1: 405, y1: 175, x2: 445, y2: 175 }
+  };
 
   // 粒子特效
   let particles = [];
@@ -507,6 +518,8 @@
     ball.inPlay = false;
     gameState = 'WAIT_LAUNCH';
     stuckFramesCounter = 0;
+    laneGate.isClosed = false;
+    laneGate.animProgress = 0;
   }
 
   function launchPlunger() {
@@ -581,6 +594,13 @@
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
 
+    // 當彈珠越過通道頂部（進入球台主場）時，觸發閘門關閉
+    if (!laneGate.isClosed && ball.y < 170) {
+      laneGate.isClosed = true;
+      SoundFX.gateClose();
+      spawnSparks(425, 175, '#ff007f', 12);
+    }
+
     // 線段碰撞判定
     for (const seg of segments) {
       const pt = closestPointOnSeg(ball.x, ball.y, seg.x1, seg.y1, seg.x2, seg.y2);
@@ -598,6 +618,28 @@
         if (dot < 0) {
           ball.vx = (ball.vx - 2 * dot * nx) * RESTITUTION;
           ball.vy = (ball.vy - 2 * dot * ny) * RESTITUTION;
+        }
+      }
+    }
+
+    // 發射通道閘門閉合後的實體碰撞
+    if (laneGate.isClosed && laneGate.animProgress > 0.4) {
+      const pt = closestPointOnSeg(ball.x, ball.y, laneGate.segment.x1, laneGate.segment.y1, laneGate.segment.x2, laneGate.segment.y2);
+      const dx = ball.x - pt.x;
+      const dy = ball.y - pt.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < ball.radius) {
+        const nx = dx / (dist || 1);
+        const ny = dy / (dist || 1);
+        ball.x = pt.x + nx * ball.radius;
+        ball.y = pt.y + ny * ball.radius;
+
+        const dot = ball.vx * nx + ball.vy * ny;
+        if (dot < 0) {
+          ball.vx = (ball.vx - 2 * dot * nx) * RESTITUTION;
+          ball.vy = (ball.vy - 2 * dot * ny) * RESTITUTION;
+          spawnSparks(ball.x, ball.y, '#ff007f', 6);
         }
       }
     }
@@ -708,6 +750,36 @@
       ctx.moveTo(seg.x1, seg.y1);
       ctx.lineTo(seg.x2, seg.y2);
       ctx.stroke();
+    }
+
+    // 繪製發射通道雷射閘門（平滑閉合動畫與鎖定警示）
+    if (laneGate.isClosed) {
+      if (laneGate.animProgress < 1) laneGate.animProgress = Math.min(1, laneGate.animProgress + 0.12);
+    } else {
+      if (laneGate.animProgress > 0) laneGate.animProgress = Math.max(0, laneGate.animProgress - 0.12);
+    }
+
+    if (laneGate.animProgress > 0.05) {
+      const gateWidth = (laneGate.segment.x2 - laneGate.segment.x1) * laneGate.animProgress;
+      ctx.save();
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#ff007f';
+      ctx.shadowColor = '#ff007f';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(laneGate.segment.x1, laneGate.segment.y1);
+      ctx.lineTo(laneGate.segment.x1 + gateWidth, laneGate.segment.y2);
+      ctx.stroke();
+
+      // 閘門閉合後的鎖定警示字樣
+      if (laneGate.animProgress >= 0.9) {
+        ctx.fillStyle = '#ff007f';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.shadowBlur = 8;
+        ctx.fillText('🔒 LOCKED', 425, 168);
+      }
+      ctx.restore();
     }
 
     // 彈簧發射井壓縮視覺
